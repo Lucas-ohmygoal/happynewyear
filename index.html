@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>New Year 2025 Particles</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Slackey&display=swap" rel="stylesheet">
+    
+    <!-- Babel for in-browser compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+        color: white;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+
+    <!-- Import Map for Dependencies -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "@mediapipe/tasks-vision": "https://esm.sh/@mediapipe/tasks-vision@0.10.8",
+    "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+  </head>
+  <body>
+    <!-- Background Music -->
+    <audio id="backgroundMusic" loop preload="auto">
+      <source src="music.mp3" type="audio/mpeg">
+      Your browser does not support the audio element.
+    </audio>
+
+    <div id="root"></div>
+
+    <!-- Main Application Script -->
+    <script type="text/babel" data-type="module">
+      import React, { useEffect, useRef, useState, useCallback } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+      import { Video, Loader2, RefreshCw } from 'lucide-react';
+
+      // --- TYPES & ENUMS ---
+      const GestureState = {
+        NONE: 'NONE',
+        ZERO: '0',
+        ONE: '1',
+        TWO: '2',
+        THREE: '3',
+        FOUR: '4',
+        FIVE: '5'
+      };
+
+      // --- UTILS: HAND LOGIC ---
+      const dist = (a, b) => Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+
+      const determineGesture = (landmarks) => {
+        if (!landmarks || landmarks.length === 0) return GestureState.NONE;
+
+        let fingersUp = 0;
+
+        // Index
+        if (landmarks[8].y < landmarks[6].y) fingersUp++;
+        
+        // Middle
+        if (landmarks[12].y < landmarks[10].y) fingersUp++;
+        
+        // Ring
+        if (landmarks[16].y < landmarks[14].y) fingersUp++;
+        
+        // Pinky
+        if (landmarks[20].y < landmarks[18].y) fingersUp++;
+
+        // Thumb
+        // If thumb tip is further from pinky base (17) than the thumb IP (2 or 3), it's extended
+        if (dist(landmarks[4], landmarks[17]) > dist(landmarks[2], landmarks[17])) {
+            fingersUp++;
+        }
+
+        switch (fingersUp) {
+          case 0: return GestureState.ZERO; // Fist
+          case 1: return GestureState.ONE;
+          case 2: return GestureState.TWO;
+          case 3: return GestureState.THREE;
+          case 4: return GestureState.FOUR;
+          case 5: return GestureState.FIVE;
+          default: return GestureState.NONE;
+        }
+      };
+
+      // --- COMPONENT: PARTICLE SYSTEM ---
+      const ParticleSystem = ({ targetText, width, height }) => {
+        const canvasRef = useRef(null);
+        const particles = useRef([]);
+        const animationRef = useRef(0);
+
+        // Configuration
+        const PARTICLE_DENSITY = 4;
+        const AMBIENT_PARTICLE_COUNT = 1500;
+        const COLORS = ['#FFD700', '#FFA500', '#FFFFFF', '#E6E6FA', '#FF4500', '#FFFF99', '#FFB6C1', '#ADD8E6']; // Gold, Orange, White, Lavender, Red, Light Yellow, Light Pink, Light Blue
+        
+        // Sizes
+        const TEXT_FONT_SIZE_NUMBER = Math.min(width, height) * 0.45;
+        const TEXT_FONT_SIZE_WORD = Math.min(width, height) * 0.20;
+        const TEXT_FONT_SIZE_SPECIAL = Math.min(width, height) * 0.15; // Smaller font for multi-line text
+
+        // Initialize particles
+        const initParticles = (targetCount) => {
+          const totalRequired = targetCount + AMBIENT_PARTICLE_COUNT;
+          const currentCount = particles.current.length;
+
+          if (currentCount < totalRequired) {
+            for (let i = 0; i < totalRequired - currentCount; i++) {
+              const isAmbient = i >= targetCount;
+              particles.current.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                targetX: width / 2,
+                targetY: height / 2,
+                color: COLORS[Math.floor(Math.random() * COLORS.length)],
+                size: isAmbient ? Math.random() * 3 + 2 : Math.random() * 4 + 3,
+                isAmbient: false
+              });
+            }
+          } else if (currentCount > totalRequired + 1000) {
+            // Trim excess if way too many
+            particles.current.splice(totalRequired + 500);
+          }
+        };
+
+        // Scan text
+        const getTargetsFromText = (text) => {
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = width;
+          offCanvas.height = height;
+          const ctx = offCanvas.getContext('2d');
+          if (!ctx) return [];
+
+          const upperText = text.toUpperCase();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const lines = upperText.split('\n');
+          const isNumber = upperText.length === 1 && /^\d$/.test(upperText);
+          const fontName = '"Slackey", serif';
+          const lineWidth = Math.max(width, height) * 0.006; 
+          
+          ctx.lineWidth = lineWidth;
+
+          if (isNumber) {
+            ctx.font = `400 ${TEXT_FONT_SIZE_NUMBER}px ${fontName}`;
+            ctx.fillText(upperText, width / 2, height / 2);
+          } else {
+            const isSpecialText = upperText.includes("HAPPY NEW YEAR");
+            const fontSize = isSpecialText ? TEXT_FONT_SIZE_SPECIAL : TEXT_FONT_SIZE_WORD;
+            ctx.font = `400 ${fontSize}px ${fontName}`;
+            const lineHeight = fontSize * 1.4;
+            let startY = (height / 2) - ((lines.length * lineHeight) / 2) + (lineHeight / 2);
+            lines.forEach((line) => {
+              ctx.fillText(line, width / 2, startY);
+              startY += lineHeight;
+            });
+          }
+
+          const imageData = ctx.getImageData(0, 0, width, height).data;
+          const targets = [];
+
+          for (let y = 0; y < height; y += PARTICLE_DENSITY) {
+            for (let x = 0; x < width; x += PARTICLE_DENSITY) {
+              if (imageData[(y * width + x) * 4 + 3] > 128) {
+                targets.push({ x, y });
+              }
+            }
+          }
+          return targets;
+        };
+
+        useEffect(() => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          let isActive = true;
+
+          const setupAndAnimate = async () => {
+              // FORCE LOAD FONT: Check and wait for the specific font to be available
+              // This fixes the issue where particles form default font shapes on first load
+              try {
+                await document.fonts.load('400 100px "Slackey"');
+              } catch (e) {
+                console.warn("Font loading error:", e);
+              }
+              await document.fonts.ready;
+              
+              if (!isActive) return;
+
+              const targets = getTargetsFromText(targetText);
+              initParticles(targets.length);
+
+              // Shuffle targets
+              const shuffledTargets = [...targets].sort(() => Math.random() - 0.5);
+
+              // Assign targets
+              particles.current.forEach((p, i) => {
+                  if (i < shuffledTargets.length) {
+                      p.isAmbient = false;
+                      p.targetX = shuffledTargets[i].x;
+                      p.targetY = shuffledTargets[i].y;
+                      p.size = Math.random() * 1.5 + 1.0; 
+                  } else {
+                      p.isAmbient = true;
+                      p.size = Math.random() * 1.5 + 0.5;
+                      
+                      if (shuffledTargets.length > 0) {
+                          const randomTarget = shuffledTargets[Math.floor(Math.random() * shuffledTargets.length)];
+                          const spread = 200; 
+                          p.targetX = randomTarget.x + (Math.random() - 0.5) * spread;
+                          p.targetY = randomTarget.y + (Math.random() - 0.5) * spread;
+                      } else {
+                          p.targetX = Math.random() * width;
+                          p.targetY = Math.random() * height;
+                      }
+                  }
+              });
+
+              const animate = () => {
+                  if (!isActive) return;
+                  ctx.clearRect(0, 0, width, height);
+
+                  particles.current.forEach((p) => {
+                      const dx = p.targetX - p.x;
+                      const dy = p.targetY - p.y;
+                      
+                      // Fast Physics - slower for special text
+                      let forceFactor = 0.35;
+                      let friction = 0.75;
+
+                      // Slower animation for "Happy New Year" text
+                      if (targetText.includes("Happy New Year")) {
+                          forceFactor = 0.15;
+                          friction = 0.85;
+                      }
+
+                      if (p.isAmbient) {
+                          forceFactor = 0.008;
+                          friction = 0.92;
+                          p.targetX += Math.sin(performance.now() * 0.001 + p.y * 0.1) * 0.5;
+                          p.targetY += Math.cos(performance.now() * 0.001 + p.x * 0.1) * 0.5;
+                      }
+
+                      const ax = dx * forceFactor;
+                      const ay = dy * forceFactor;
+
+                      p.vx += ax;
+                      p.vy += ay;
+
+                      p.vx *= friction;
+                      p.vy *= friction;
+
+                      // Jitter
+                      p.vx += (Math.random() - 0.5) * 0.8;
+                      p.vy += (Math.random() - 0.5) * 0.8;
+
+                      p.x += p.vx;
+                      p.y += p.vy;
+
+                      // Draw
+                      ctx.beginPath();
+                      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                      ctx.fillStyle = p.color;
+                      ctx.globalAlpha = p.isAmbient ? 0.3 : 1.0;
+                      ctx.fill();
+                  });
+                  ctx.globalAlpha = 1.0;
+
+                  animationRef.current = requestAnimationFrame(animate);
+              };
+
+              animate();
+          };
+
+          setupAndAnimate();
+
+          return () => {
+            isActive = false;
+            cancelAnimationFrame(animationRef.current || 0);
+          };
+        }, [targetText, width, height]);
+
+        return (
+          <canvas 
+            ref={canvasRef} 
+            width={width} 
+            height={height} 
+            className="absolute top-0 left-0 w-full h-full z-10"
+          />
+        );
+      };
+
+      // --- COMPONENT: APP ---
+      const App = () => {
+        const videoRef = useRef(null);
+        const audioRef = useRef(null);
+        const [gesture, setGesture] = useState(GestureState.NONE);
+        const [loading, setLoading] = useState(true);
+        const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
+        const [permissionError, setPermissionError] = useState(false);
+        const [useCameraBackground, setUseCameraBackground] = useState(true);
+        const [backgroundImage, setBackgroundImage] = useState(null);
+        const [musicPlaying, setMusicPlaying] = useState(false);
+
+        // Load background image when camera background is disabled
+        useEffect(() => {
+          if (useCameraBackground) {
+            setBackgroundImage(null);
+            return;
+          }
+
+          // Always use bg.jpg when camera background is disabled
+          const img = new Image();
+          img.onload = () => {
+            setBackgroundImage(img);
+          };
+          img.onerror = () => {
+            console.warn(`Failed to load background image: bg.jpg`);
+            setBackgroundImage(null);
+          };
+          img.src = 'bg.jpg';
+        }, [useCameraBackground]);
+
+        // Audio playback management
+        useEffect(() => {
+          const audio = document.getElementById('backgroundMusic');
+          if (!audio) return;
+
+          audioRef.current = audio;
+
+          // Function to start music
+          const startMusic = async () => {
+            try {
+              await audio.play();
+              setMusicPlaying(true);
+              console.log('Music started successfully');
+            } catch (error) {
+              console.warn('Auto-play failed, waiting for user interaction:', error);
+            }
+          };
+
+          // Try to auto-play on load
+          startMusic();
+
+          // Fallback: start music on any user interaction
+          const handleUserInteraction = () => {
+            if (!musicPlaying && audioRef.current) {
+              audioRef.current.play().then(() => {
+                setMusicPlaying(true);
+                console.log('Music started after user interaction');
+              }).catch(err => console.warn('Failed to start music:', err));
+            }
+          };
+
+          // Listen for user interactions to start music
+          const events = ['click', 'touchstart', 'keydown', 'scroll'];
+          events.forEach(event => {
+            document.addEventListener(event, handleUserInteraction, { once: true });
+          });
+
+          return () => {
+            events.forEach(event => {
+              document.removeEventListener(event, handleUserInteraction);
+            });
+          };
+        }, [musicPlaying]);
+
+        useEffect(() => {
+          const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+          window.addEventListener('resize', handleResize);
+          return () => window.removeEventListener('resize', handleResize);
+        }, []);
+
+        const handleGestureDetected = useCallback((detectedGesture) => {
+          setGesture(detectedGesture);
+        }, []);
+
+        useEffect(() => {
+          let handLandmarker = null;
+          let animationFrameId;
+          let stream = null;
+
+          const setupVision = async () => {
+            try {
+              const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+              );
+              
+              handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                  modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                  delegate: "GPU"
+                },
+                runningMode: "VIDEO",
+                numHands: 1
+              });
+
+              await startWebcam(handLandmarker);
+            } catch (error) {
+              console.error("Error loading MediaPipe:", error);
+              setLoading(false);
+            }
+          };
+
+          const startWebcam = async (landmarker) => {
+            if (!videoRef.current) return;
+            
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 },
+                audio: false
+              });
+              
+              if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                videoRef.current.addEventListener("loadeddata", () => {
+                  setLoading(false);
+                  predictWebcam(landmarker);
+                });
+              }
+            } catch (err) {
+              console.error("Camera denied:", err);
+              setPermissionError(true);
+              setLoading(false);
+            }
+          };
+
+          let lastVideoTime = -1;
+          const predictWebcam = (landmarker) => {
+            if (!videoRef.current) return;
+
+            const startTimeMs = performance.now();
+            if (videoRef.current.currentTime !== lastVideoTime) {
+              lastVideoTime = videoRef.current.currentTime;
+              if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+                 const results = landmarker.detectForVideo(videoRef.current, startTimeMs);
+                 if (results.landmarks && results.landmarks.length > 0) {
+                   const detectedGesture = determineGesture(results.landmarks[0]);
+                   handleGestureDetected(detectedGesture);
+                 } else {
+                   handleGestureDetected(GestureState.NONE);
+                 }
+              }
+            }
+            animationFrameId = requestAnimationFrame(() => predictWebcam(landmarker));
+          };
+
+          setupVision();
+
+          return () => {
+            cancelAnimationFrame(animationFrameId);
+            if (stream) {
+              stream.getTracks().forEach(t => t.stop());
+            }
+            if (videoRef.current) {
+              videoRef.current.srcObject = null;
+            }
+          };
+        }, [handleGestureDetected]);
+
+        const getDisplayText = () => {
+          switch (gesture) {
+              case GestureState.FIVE: return "5";
+              case GestureState.FOUR: return "4";
+              case GestureState.THREE: return "3";
+              case GestureState.TWO: return "2";
+              case GestureState.ONE: return "1";
+              case GestureState.ZERO: return "Happy\nNew\nYear";
+              case GestureState.NONE:
+              default: return "GOOD BYE\n 2025";
+          }
+        };
+
+        const handleRetry = () => {
+          window.location.reload();
+        };
+
+        const handleDoubleClick = () => {
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => console.warn(err));
+          } else {
+            if (document.exitFullscreen) document.exitFullscreen();
+          }
+        };
+
+        return (
+          <div
+            className="relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center font-sans"
+            onDoubleClick={handleDoubleClick}
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 z-0 transform scale-x-[-1]"
+              style={{
+                width: '100vw',
+                height: '100vh',
+                objectFit: 'cover',
+                filter: 'blur(2px) brightness(0.4)',
+                opacity: useCameraBackground ? 1 : 0,
+                pointerEvents: useCameraBackground ? 'none' : 'none'
+              }}
+            />
+
+            {backgroundImage && !useCameraBackground && (
+              <img
+                src={backgroundImage.src}
+                alt="Background"
+                className="absolute inset-0 z-0 object-cover"
+                style={{
+                  filter: 'blur(3px) brightness(0.6)',
+                  width: '100vw',
+                  height: '100vh'
+                }}
+              />
+            )}
+
+            <ParticleSystem
+              targetText={getDisplayText()}
+              width={windowSize.width}
+              height={windowSize.height}
+            />
+
+            {/* Toggle Button */}
+            <button
+              onClick={() => setUseCameraBackground(!useCameraBackground)}
+              className="absolute top-4 right-4 z-50 p-2 bg-white/20 backdrop-blur-sm text-white rounded-full hover:bg-white/30 transition-colors"
+              title={useCameraBackground ? 'Switch to Black Background' : 'Switch to Camera Background'}
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className={`transition-colors duration-300 ${useCameraBackground ? 'text-cyan-400' : 'text-gray-400'}`}
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="3"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  fill="none"
+                />
+                <path
+                  d="M12 5C8.13 5 5 8.13 5 12C5 15.87 8.13 19 12 19C15.87 19 19 15.87 19 12C19 8.13 15.87 5 12 5Z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  fill="none"
+                />
+                <path
+                  d="M12 8.5C10.62 8.5 9.5 9.62 9.5 11C9.5 12.38 10.62 13.5 12 13.5C13.38 13.5 14.5 12.38 14.5 11C14.5 9.62 13.38 8.5 12 8.5Z"
+                  fill="currentColor"
+                  className={useCameraBackground ? 'opacity-100' : 'opacity-40'}
+                />
+                <path
+                  d="M17 7L19 5M19 7L17 5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  className={useCameraBackground ? 'opacity-100' : 'opacity-40'}
+                />
+              </svg>
+            </button>
+
+            {loading && !permissionError && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black bg-opacity-70 text-white backdrop-blur-sm">
+                <Loader2 className="w-12 h-12 animate-spin mb-4 text-orange-500" />
+                <p className="text-xl tracking-wider font-light">Initializing Magic...</p>
+              </div>
+            )}
+
+            {permissionError && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md text-white p-8 text-center z-[60]">
+                <Video className="w-16 h-16 text-red-500 mb-4" />
+                <h2 className="text-2xl font-bold mb-2">Camera Access Required</h2>
+                <p className="max-w-md text-gray-300 mb-6">
+                   Camera access is needed for hand gestures.
+                </p>
+                <button 
+                  onClick={handleRetry}
+                  className="flex items-center gap-2 px-6 py-3 bg-orange-600 text-white rounded-full font-bold hover:bg-orange-700 transition-colors shadow-lg shadow-orange-900/20"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Reload Application
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // --- MOUNT ROOT ---
+      const rootElement = document.getElementById('root');
+      const root = createRoot(rootElement);
+      root.render(<App />);
+    </script>
+  </body>
+</html>
