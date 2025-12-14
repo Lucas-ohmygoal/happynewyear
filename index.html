@@ -62,7 +62,7 @@
       import React, { useEffect, useRef, useState, useCallback } from 'react';
       import { createRoot } from 'react-dom/client';
       import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-      import { Video, Loader2, RefreshCw } from 'lucide-react';
+      import { Video, Loader2, RefreshCw, Timer } from 'lucide-react';
 
       // --- TYPES & ENUMS ---
       const GestureState = {
@@ -336,6 +336,8 @@
         const [useCameraBackground, setUseCameraBackground] = useState(true);
         const [backgroundImage, setBackgroundImage] = useState(null);
         const [musicPlaying, setMusicPlaying] = useState(false);
+        const [isCountdownActive, setIsCountdownActive] = useState(false);
+        const [countdownText, setCountdownText] = useState('');
 
         // Load background image when camera background is disabled
         useEffect(() => {
@@ -494,6 +496,7 @@
         }, [handleGestureDetected]);
 
         const getDisplayText = () => {
+          if (isCountdownActive) return countdownText;
           switch (gesture) {
               case GestureState.FIVE: return "5";
               case GestureState.FOUR: return "4";
@@ -508,6 +511,20 @@
 
         const handleRetry = () => {
           window.location.reload();
+        };
+
+        const startCountdown = () => {
+          setIsCountdownActive(true);
+          setCountdownText('5');
+          setTimeout(() => setCountdownText('4'), 1000);
+          setTimeout(() => setCountdownText('3'), 2000);
+          setTimeout(() => setCountdownText('2'), 3000);
+          setTimeout(() => setCountdownText('1'), 4000);
+          setTimeout(() => setCountdownText('Happy\nNew\nYear'), 5000);
+          setTimeout(() => {
+            setCountdownText('');
+            setIsCountdownActive(false);
+          }, 15000);
         };
 
         const handleDoubleClick = () => {
@@ -599,6 +616,15 @@
                   className={useCameraBackground ? 'opacity-100' : 'opacity-40'}
                 />
               </svg>
+            </button>
+
+            {/* Countdown Button */}
+            <button
+              onClick={startCountdown}
+              className="absolute top-16 right-4 z-50 p-2 bg-white/20 backdrop-blur-sm text-white rounded-full hover:bg-white/30 transition-colors"
+              title="Start Countdown"
+            >
+              <Timer className="w-6 h-6 text-gray-400 hover:text-cyan-400 transition-colors duration-300" />
             </button>
 
             {loading && !permissionError && (
